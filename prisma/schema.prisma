@@ -1,0 +1,407 @@
+// Cook with Nikita — data model
+// SQLite for local dev. To move to Postgres: change `provider` below to
+// "postgresql", point DATABASE_URL at a Postgres connection string, and
+// run `prisma migrate dev` again — nothing else in this file changes.
+// See README.md "Moving to Postgres".
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum VegType {
+  VEG
+  NON_VEG
+  JAIN
+}
+
+enum Fulfilment {
+  DELIVERY
+  PICKUP
+}
+
+enum OrderStatus {
+  RECEIVED
+  ACCEPTED
+  COOKING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  MOCK
+  RAZORPAY
+  COD
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum CouponType {
+  PERCENTAGE
+  FLAT
+  FREE_DELIVERY
+}
+
+enum ClassMode {
+  ONLINE
+  IN_PERSON
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum EnquiryType {
+  CATERING
+  CONTACT
+  GENERAL
+}
+
+enum EnquiryStatus {
+  NEW
+  RESPONDED
+  CLOSED
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+/// One well on the masala dabba selector.
+model Category {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  name      String
+  /// Key into the icon map in lib/dabba-icons.tsx — not a Lucide name
+  /// directly, so swapping icon libraries later doesn't touch seed data.
+  icon      String
+  sortOrder Int       @default(0)
+  products  Product[]
+
+  @@index([sortOrder])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+
+  vegType     VegType
+  spiceLevel  Int     @default(0) // 0 (none) – 3 (very spicy)
+  servesCount Int     @default(1)
+
+  /// Price of the default variant, in whole rupees. Variants add a delta
+  /// on top of this — see ProductVariant.priceDelta.
+  basePrice Int
+  image     String
+
+  /// Cooked-fresh items sell out; pantry items (pickles, kits) don't.
+  /// Null means unlimited.
+  dailyLimit    Int?
+  /// 0 = same-day, 24 = needs a day's notice (shown as "Order by 8pm
+  /// for tomorrow" — the cutoff hour itself is a kitchen-wide setting,
+  /// see lib/kitchen.ts).
+  leadTimeHours Int  @default(0)
+
+  isTodaysSpecial Boolean @default(false)
+  isAvailable     Boolean @default(true)
+  /// Simple order-count score, seeded once — the real thing is a
+  /// computed aggregate once there's order history to sort by.
+  popularity      Int     @default(0)
+
+  variants   ProductVariant[]
+  addOns     AddOn[]
+  orderItems OrderItem[]
+  reviews    Review[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([isTodaysSpecial])
+}
+
+model ProductVariant {
+  id         String  @id @default(cuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  label      String // "Half" / "Full", "250g" / "500g" / "1kg"
+  priceDelta Int     @default(0)
+  isDefault  Boolean @default(false)
+  sortOrder  Int     @default(0)
+
+  orderItems OrderItem[]
+
+  @@index([productId])
+}
+
+model AddOn {
+  id       String    @id @default(cuid())
+  name     String
+  price    Int
+  products Product[]
+
+  orderItemOptions OrderItemOption[]
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  phone     String    @unique
+  email     String?
+  addresses Address[]
+  orders    Order[]
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String // "Home" / "Work"
+  line1      String
+  line2      String?
+  city       String
+  pincode    String
+  isDefault  Boolean  @default(false)
+
+  orders Order[]
+
+  @@index([customerId])
+}
+
+model TimeSlot {
+  id         String      @id @default(cuid())
+  label      String // "12:00 PM – 1:00 PM"
+  startTime  String // "12:00"
+  endTime    String // "13:00"
+  capacity   Int
+  fulfilment Fulfilment?
+  isActive   Boolean     @default(true)
+  sortOrder  Int         @default(0)
+
+  orders Order[]
+}
+
+model KitchenHoliday {
+  id     String   @id @default(cuid())
+  date   DateTime
+  reason String?
+}
+
+model Coupon {
+  id             String     @id @default(cuid())
+  code           String     @unique
+  type           CouponType
+  /// Percentage points for PERCENTAGE, rupees for FLAT, ignored for
+  /// FREE_DELIVERY.
+  value          Int        @default(0)
+  minOrderValue  Int?
+  firstOrderOnly Boolean    @default(false)
+  maxUses        Int?
+  usedCount      Int        @default(0)
+  isActive       Boolean    @default(true)
+  expiresAt      DateTime?
+
+  orders Order[]
+}
+
+model Order {
+  id          String    @id @default(cuid())
+  /// Human-readable, shown in mono on confirmation/tracking — e.g.
+  /// "CWN-241130-0042". Not used for lookups; `id` is.
+  orderNumber String    @unique
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+
+  guestName  String
+  guestPhone String
+
+  fulfilment Fulfilment
+  addressId  String?
+  address    Address?   @relation(fields: [addressId], references: [id])
+  pincode    String?
+
+  scheduledDate String // ISO date, "2026-08-20"
+  slotId        String?
+  slot          TimeSlot? @relation(fields: [slotId], references: [id])
+
+  status        OrderStatus @default(RECEIVED)
+  deliveryNotes String?
+
+  itemTotal      Int
+  packagingFee   Int @default(0)
+  deliveryFee    Int @default(0)
+  discountAmount Int @default(0)
+  gstAmount      Int @default(0)
+  grandTotal     Int
+
+  couponId String?
+  coupon   Coupon? @relation(fields: [couponId], references: [id])
+
+  paymentMethod    PaymentMethod
+  paymentStatus    PaymentStatus @default(PENDING)
+  /// Provider transaction id once paid — a mock reference for
+  /// MockProvider, Razorpay's payment id for RazorpayProvider.
+  paymentReference String?
+  /// The Razorpay order id issued for THIS order, set when charge()
+  /// returns "requires_client_action". confirmRazorpayPaymentAction
+  /// checks the client-supplied razorpayOrderId against this before
+  /// marking paid, so a valid signature for a different order can't be
+  /// replayed here — see actions/checkout.ts.
+  razorpayOrderId  String?
+
+  items OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([scheduledDate])
+}
+
+model OrderItem {
+  id        String          @id @default(cuid())
+  orderId   String
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product         @relation(fields: [productId], references: [id])
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
+
+  quantity            Int
+  /// Snapshot of unit price (base + variant delta) at order time, so a
+  /// later menu price change never rewrites history.
+  unitPrice           Int
+  spiceLevel          Int?
+  specialInstructions String? // capped at 200 chars client-side
+
+  options OrderItemOption[]
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model OrderItemOption {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  addOnId     String?
+  addOn       AddOn?    @relation(fields: [addOnId], references: [id])
+  /// Snapshot label/price so historical orders read correctly even if
+  /// the add-on is renamed or repriced later.
+  label       String
+  priceDelta  Int
+
+  @@index([orderItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Classes
+// ---------------------------------------------------------------------------
+
+model ClassSession {
+  id              String    @id @default(cuid())
+  slug            String    @unique
+  title           String
+  description     String
+  mode            ClassMode
+  dateTime        DateTime
+  durationMinutes Int
+  price           Int
+  seatsTotal      Int
+  image           String
+
+  bookings Booking[]
+  reviews  Review[]
+}
+
+model Booking {
+  id             String        @id @default(cuid())
+  classSessionId String
+  classSession   ClassSession  @relation(fields: [classSessionId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  guestName      String
+  guestPhone     String
+  guestEmail     String?
+  seats          Int           @default(1)
+  amountPaid     Int
+  paymentStatus  PaymentStatus @default(PENDING)
+  /// Provider transaction id once paid — mirrors Order.paymentReference.
+  paymentReference String?
+  /// The Razorpay order id issued for THIS booking — see
+  /// Order.razorpayOrderId for why confirmRazorpayBookingAction checks
+  /// against it rather than trusting the client-supplied id alone.
+  razorpayOrderId  String?
+  status         BookingStatus @default(CONFIRMED)
+  createdAt      DateTime      @default(now())
+
+  @@index([classSessionId])
+}
+
+// ---------------------------------------------------------------------------
+// Content / ops
+// ---------------------------------------------------------------------------
+
+model Review {
+  id             String        @id @default(cuid())
+  customerName   String
+  rating         Int // 1–5
+  quote          String
+  detail         String? // "Ordered: Chettinad fish curry"
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id])
+  classSessionId String?
+  classSession   ClassSession? @relation(fields: [classSessionId], references: [id])
+  isPublished    Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+}
+
+model Enquiry {
+  id         String        @id @default(cuid())
+  type       EnquiryType
+  name       String
+  phone      String
+  email      String?
+  message    String
+  guestCount Int?
+  eventDate  String?
+  cuisine    String?
+  budgetBand String?
+  status     EnquiryStatus @default(NEW)
+  createdAt  DateTime      @default(now())
+}
+
+model NewsletterSignup {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  isActive     Boolean  @default(true)
+  subscribedAt DateTime @default(now())
+}

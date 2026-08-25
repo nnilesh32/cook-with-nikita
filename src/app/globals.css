@@ -1,26 +1,160 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Cook with Nikita — design tokens
+ * ---------------------------------
+ * Six brand colours (ink, steel, bone, turmeric, kashmiri, coriander) are the
+ * only hand-picked values below. Every other surface (card, secondary,
+ * muted, accent, popover…) is derived from those six with color-mix(), so
+ * the whole system stays provably related to the palette instead of
+ * drifting into one-off hex codes. See CONTENT.md / README for the plan.
+ */
 
 @theme inline {
+  --font-sans: var(--font-body);
+  --font-body: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  --color-ink: var(--ink);
+  --color-steel: var(--steel);
+  --color-bone: var(--bone);
+  --color-turmeric: var(--turmeric);
+  --color-kashmiri: var(--kashmiri);
+  --color-coriander: var(--coriander);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* --- the six brand colours (see README design table) --- */
+  --ink: #181614;
+  --steel: #c6c9cb;
+  --bone: #efeee9;
+  --turmeric: #e3a017;
+  --kashmiri: #be3020;
+  --coriander: #3e6b3b;
+
+  /* --- page base --- */
+  --background: var(--bone);
+  --foreground: var(--ink);
+
+  /* --- surfaces: paper lifted off the steel-toned counter --- */
+  --card: color-mix(in oklch, var(--bone) 55%, white 45%);
+  --card-foreground: var(--ink);
+  --popover: color-mix(in oklch, var(--bone) 35%, white 65%);
+  --popover-foreground: var(--ink);
+
+  /* --- primary: turmeric CTA, ink text tests ~8:1 --- */
+  --primary: var(--turmeric);
+  --primary-foreground: var(--ink);
+
+  /* --- secondary / muted / accent: steel and turmeric tints of bone --- */
+  --secondary: color-mix(in oklch, var(--steel) 32%, var(--bone) 68%);
+  --secondary-foreground: var(--ink);
+  --muted: color-mix(in oklch, var(--steel) 18%, var(--bone) 82%);
+  --muted-foreground: color-mix(in oklch, var(--ink) 68%, var(--bone) 32%);
+  --accent: color-mix(in oklch, var(--turmeric) 14%, var(--bone) 86%);
+  --accent-foreground: var(--ink);
+
+  /* --- status: kashmiri for errors/urgency, coriander for veg/success --- */
+  --destructive: var(--kashmiri);
+  --destructive-foreground: color-mix(in oklch, var(--bone) 40%, white 60%);
+  --success: var(--coriander);
+  --success-foreground: color-mix(in oklch, var(--bone) 40%, white 60%);
+
+  --border: var(--steel);
+  --input: var(--steel);
+  --ring: var(--turmeric);
+
+  /* precise, label-on-a-tin corners — not the soft AI-bubble radius */
+  --radius: 0.5rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  html {
+    @apply font-body;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+
+  ::selection {
+    background-color: var(--turmeric);
+    color: var(--ink);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Subtle film-grain overlay for hero sections — one bold thing (the dabba
+   selector) gets the visual budget, so this stays quiet: a single small
+   tiled noise SVG at low opacity, screened over the section. */
+@utility bg-grain {
+  position: relative;
+  isolation: isolate;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
